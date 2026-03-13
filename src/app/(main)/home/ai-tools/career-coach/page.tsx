@@ -39,52 +39,12 @@ import { UserQuizData } from "@/lib/types/allTypes";
 import { getUserQuizData } from "@/lib/functions/dbActions";
 import { Skeleton } from "@/components/ui/skeleton";
 import { runAgent } from "@/lib/functions/Agents";
+import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import ReactMarkdown from "react-markdown";
 import { BsStars } from "react-icons/bs";
 import AILoadingState from "@/components/kokonutui/ai-loading";
 import axios from "axios";
-
-import {
-  AlertCircle,
-  Copy,
-  LucideBrain,
-  MessageSquare,
-  RefreshCw,
-} from "lucide-react";
-import { toast } from "sonner";
-
-import {
-  Message,
-  MessageAction,
-  MessageActions,
-  MessageContent,
-  MessageResponse,
-} from "@/components/ai-elements/message";
-import {
-  Reasoning,
-  ReasoningContent,
-  ReasoningTrigger,
-} from "@/components/ai-elements/reasoning";
-import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "@/components/ai-elements/tool";
-import {
-  Conversation,
-  ConversationContent,
-  ConversationEmptyState,
-  ConversationScrollButton,
-} from "@/components/ai-elements/conversation";
-import { Loader } from "@/components/ai-elements/Loader";
-import { useChat } from "@ai-sdk/react";
-import {
-  DefaultChatTransport,
-  lastAssistantMessageIsCompleteWithApprovalResponses,
-} from "ai";
 
 type Message = {
   role: "user" | "ai";
@@ -106,9 +66,18 @@ const CareerCoach = () => {
   const [showQuizDialog, setShowQuizDialog] = useState(false);
 
   // AI PART
-  // const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+
+  // follow-up state
+  const [followUpQuestions, setFollowUpQuestions] = useState<string[]>([]);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    scrollRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -123,12 +92,12 @@ const CareerCoach = () => {
 
       if (Array.isArray(options)) {
         setCareerSkillOptions(options);
-        console.log("Career Options:", options);
+        // console.log("Career Options:", options);
       }
       const summary = firstQuiz.quizInfo?.summary;
       if (typeof summary === "string") {
         setQuizSummary(summary);
-        console.log("summary--------",summary);
+        // console.log("summary--------",summary);
       }
 
       const stream = firstQuiz.quizInfo?.stream;
@@ -142,58 +111,79 @@ const CareerCoach = () => {
     fetchData();
   }, [user?.id]);
 
-  const context = {
-    userId: user?.id,
-    userName: user?.userName,
-    user_current_status: user?.current_status,
-    careerOptions: careerSkillOptions.join(", "),
-    summary: quizSummary,
-    stream: quizStream,
-  };
+  const sendMessage = async () => {
+    const content = input.trim();
+    if (!content) {
+      toast.error("Please enter a message to send.");
+      return;
+    }
+    if (user?.isQuizDone == false) {
+      setShowQuizDialog(true);
+      return;
+    }
 
-  console.log("context", context);
+    if (aiLoading) return;
 
-  const {
-    messages,
-    sendMessage,
-    status,
-    setMessages,
-    addToolApprovalResponse,
-  } = useChat({
-    transport: new DefaultChatTransport({
-      api: "/api/agent/chat",
-      body: {
-        userId: user?.id || "d18449ac-18a5-4fd1-88ed-ecedaadcda29",
+    setAiLoading(true);
+
+    const userMessage: Message = { role: "user", text: input };
+    setMessages((prev) => [...prev, userMessage]);
+
+    const userInput = input;
+    setInput("");
+
+    try {
+      // Construct context object
+      const ctx: any = {
+        question: userInput,
+        userId: user?.id,
         userName: user?.userName,
         user_current_status: user?.current_status,
         careerOptions: careerSkillOptions.join(", "),
         summary: quizSummary,
-        stream: quizStream,
-      },
-    }),
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
-  });
+      };
 
-  const isLastMessageFromAssistant =
-    messages.length > 0 && messages[messages.length - 1].role === "assistant";
+      ctx.stream = quizStream;
 
-  const handleSendMessage = async () => {
-    if (!input.trim()) return;
+      // console.log("Context passing to AI:", ctx);
 
-    sendMessage({
-      parts: [{ type: "text", text: input }],
-    });
-    setInput("");
+      const aiReply = await runAgent(ctx);
+      console.log("AI Reply:---------->", aiReply);
+
+      const aiMessage: Message = {
+        role: "ai",
+        text: typeof aiReply === "string" ? aiReply : String(aiReply),
+      };
+
+      setMessages((prev) => [...prev, aiMessage]);
+      // FOLLOW UP QUESTIONS=====================================
+      (async () => {
+        try {
+          const { data } = await axios.post("/api/ai/follow-up", {
+            conversationString: `User: ${userInput}\nAI: ${aiMessage.text}`,
+          });
+
+          const followUps: string[] = Array.isArray(data.followUps)
+            ? data.followUps.slice(0, 4)
+            : [];
+
+          setFollowUpQuestions(followUps);
+        } catch (err) {
+          console.error("Follow-up questions error:", err);
+          setFollowUpQuestions([]); // fallback to empty
+        }
+      })();
+    } catch (err) {
+      console.error(err);
+      setMessages((prev) => [
+        ...prev,
+        { role: "ai", text: "Something went wrong." },
+      ]);
+      toast.error("Something went wrong.");
+    } finally {
+      setAiLoading(false);
+    }
   };
-
-  // follow-up state
-  const [followUpQuestions, setFollowUpQuestions] = useState<string[]>([]);
-
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    scrollRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
 
   const clearChat = async () => {
     if (!user?.id) return;
@@ -320,160 +310,67 @@ const CareerCoach = () => {
               )}
             </>
           ) : (
-            <div className="h-[460px] overflow-y-scroll font-inter px-6 max-w-[900px] mx-auto">
-              <Conversation>
-                <ConversationContent>
-                  {messages.length === 0 ? (
-                    <ConversationEmptyState
-                      icon={<MessageSquare className="size-12" />}
-                      title="Start a conversation"
-                      description="Ask any question! from your PM"
-                    />
-                  ) : (
-                    <>
-                      {messages.map((message, messageIndex) => {
-                        const isLastMessage =
-                          messageIndex === messages.length - 1;
-                        const isStreaming =
-                          status === "streaming" && isLastMessage;
-
-                        return (
-                          <div key={message.id}>
-                            {message.parts.map((part, partIndex) => {
-                              if (part.type === "reasoning") {
-                                return (
-                                  <Reasoning
-                                    key={`${message.id}-${partIndex}`}
-                                    isStreaming={
-                                      isStreaming &&
-                                      partIndex === message.parts.length - 1
-                                    }
-                                  >
-                                    <ReasoningTrigger />
-                                    <ReasoningContent>
-                                      {part.text}
-                                    </ReasoningContent>
-                                  </Reasoning>
-                                );
-                              }
-
-                              if (part.type === "text") {
-                                return (
-                                  <Message
-                                    key={`${message.id}-${partIndex}`}
-                                    from={message.role}
-                                  >
-                                    <MessageContent>
-                                      <MessageResponse>
-                                        {part.text}
-                                      </MessageResponse>
-                                    </MessageContent>
-                                    {message.role === "assistant" &&
-                                      isLastMessage &&
-                                      !isStreaming && (
-                                        <MessageActions>
-                                          <MessageAction
-                                            tooltip="Copy"
-                                            // onClick={() => handleCopy(part.text)}
-                                          >
-                                            <Copy className="size-3" />
-                                          </MessageAction>
-                                          <MessageAction
-                                            tooltip="Regenerate"
-                                            // onClick={onRegenerate}
-                                          >
-                                            <RefreshCw className="size-3" />
-                                          </MessageAction>
-                                        </MessageActions>
-                                      )}
-                                  </Message>
-                                );
-                              }
-
-                              // Handle tool parts (type starts with "tool-")
-                              if (part.type.startsWith("tool-")) {
-                                const toolPart = part as {
-                                  type: `tool-${string}`;
-                                  state:
-                                    | "input-streaming"
-                                    | "input-available"
-                                    | "output-available"
-                                    | "output-error";
-                                  input?: unknown;
-                                  output?: unknown;
-                                  errorText?: string;
-                                };
-
-                                // Auto-open completed or error tools
-                                const shouldOpen =
-                                  toolPart.state === "output-available" ||
-                                  toolPart.state === "output-error";
-
-                                return (
-                                  <div
-                                    key={`${message.id}-${partIndex}`}
-                                    className="my-2 ml-10"
-                                  >
-                                    <Tool defaultOpen={shouldOpen}>
-                                      <ToolHeader
-                                        type={toolPart.type}
-                                        state={toolPart.state}
-                                      />
-                                      <ToolContent>
-                                        <ToolInput input={toolPart.input} />
-                                        {(toolPart.state ===
-                                          "output-available" ||
-                                          toolPart.state ===
-                                            "output-error") && (
-                                          <ToolOutput
-                                            output={toolPart.output}
-                                            errorText={toolPart.errorText}
-                                          />
-                                        )}
-                                      </ToolContent>
-                                    </Tool>
-                                  </div>
-                                );
-                              }
-
-                              return null;
-                            })}
+            <div>
+              <ScrollArea className="h-[64vh]  px-4 py-2 w-[850px] mx-auto -mt-5 ">
+                <div className="flex flex-col gap-5">
+                  {messages.map((msg, idx) =>
+                    msg.role === "user" ? (
+                      // User message
+                      <div
+                        key={idx}
+                        className="max-w-[70%] px-3 py-2 rounded-md text-sm font-inter tracking-tight leading-snug bg-blue-500 text-white self-end"
+                      >
+                        <ReactMarkdown>{msg.text}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      // AI message and dollow up questions
+                      <>
+                        <div
+                          key={idx}
+                          className="max-w-[75%] px-3 py-3 rounded-md text-sm font-inter tracking-normal leading-relaxed bg-blue-100 text-black flex  gap-2"
+                        >
+                          <BsStars
+                            className="text-blue-600 mt-1 shrink-0"
+                            size={30}
+                          />
+                          <div>
+                            <ReactMarkdown>{msg.text}</ReactMarkdown>
                           </div>
-                        );
-                      })}
-
-                      {status === "submitted" && (
-                        <div className="flex items-center gap-2">
-                          <Loader />
-                          <span className="text-sm text-muted-foreground">
-                            Thinking...
-                          </span>
                         </div>
-                      )}
 
-                      {status === "error" && (
-                        <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 p-3">
-                          <AlertCircle className="size-4 text-destructive" />
-                          <span className="flex-1 text-sm text-destructive">
-                            Failed to get response
-                          </span>
-                          {isLastMessageFromAssistant && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              //   onClick={onRegenerate}
-                              className="text-destructive hover:text-destructive"
-                            >
-                              <RefreshCw className="mr-1 size-3" />
-                              Retry
-                            </Button>
-                          )}
-                        </div>
-                      )}
-                    </>
+                        {followUpQuestions.length > 0 && (
+                          <div className=" bg-gray-200 max-w-[700px] p-3 rounded-md shadow">
+                            <p className="font-inter text-sm text-blue-600">
+                              <LucideActivity className="w-4 h-4 inline" />{" "}
+                              Follow Up
+                            </p>
+                            <div className="mt-2 grid grid-cols-2 gap-4">
+                              {followUpQuestions.map((q, i) => (
+                                <button
+                                  key={i}
+                                  className="bg-white hover:bg-blue-50 border hover:border-blue-300 cursor-pointer px-3 py-1 rounded-md transition text-xs font-inter"
+                                  onClick={() => {
+                                    setInput(q);
+                                  }}
+                                >
+                                  {q}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )
                   )}
-                </ConversationContent>
-              </Conversation>
+                  {aiLoading && (
+                    <div className="flex self-start mt-2 ml-2">
+                      <AILoadingState />
+                    </div>
+                  )}
+
+                  <div ref={scrollRef} />
+                </div>
+              </ScrollArea>
             </div>
           )}
 
@@ -518,11 +415,7 @@ const CareerCoach = () => {
                   rows={60}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={async (event) => {
-                    if (event.key === "Enter") {
-                      handleSendMessage();
-                    }
-                  }}
+                  onKeyDown={handleKeyDown}
                   className="resize-none h-[105px] bg-gray-50 placeholder:text-gray-600 text-black font-sora text-sm"
                 />
 
@@ -535,7 +428,7 @@ const CareerCoach = () => {
                 <div className="absolute bottom-2 right-4">
                   <div
                     className="flex items-center gap-2 bg-blue-100 p-2 rounded  text-gray-600 hover:text-blue-600 cursor-pointer"
-                    onClick={handleSendMessage}
+                    onClick={sendMessage}
                   >
                     <LucideSendHorizontal size={18} className="-rotate-45" />
                   </div>
