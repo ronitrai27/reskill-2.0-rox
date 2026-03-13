@@ -102,12 +102,10 @@ export async function POST(request: Request) {
       );
     }
 
-    //  Pick schema + prompt dynamically ---
     const { schema, prompt } = getSchemaAndPrompt(userStatus, mainFocus);
     const parser = StructuredOutputParser.fromZodSchema(schema as any);
     const chain = prompt.pipe(llm).pipe(parser);
 
-    //  Convert quiz data into plain string ---
     const quizString = quizData
       .map((q) => `${q.question}: ${q.answer}`)
       .join("\n");
