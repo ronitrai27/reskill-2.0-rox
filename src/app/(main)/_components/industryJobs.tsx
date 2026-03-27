@@ -482,20 +482,32 @@ export default function CareerTabsDemo() {
 
                     {/* push this container to bottom */}
                     <div className="flex items-center justify-between gap-10 mt-auto w-full">
-                      <Button
-                        className="cursor-pointer w-3/4 bg-gradient-to-r from-blue-300 to-pink-200 text-black"
-                        variant="outline"
-                      >
-                        <a
-                          href={job.apply_options[0].link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-inter text-sm inline-block cursor-pointer"
+                      {job.apply_options && job.apply_options.length > 0 ? (
+                        <Button
+                          className="cursor-pointer w-3/4 bg-gradient-to-r from-blue-300 to-pink-200 text-black"
+                          variant="outline"
                         >
-                          Click to Apply{" "}
-                        </a>
-                        <ExternalLink className="inline-block ml-5 cursor-pointer" />
-                      </Button>
+                          <a
+                            href={job.apply_options[0].link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-inter text-sm inline-block cursor-pointer"
+                          >
+                            Click to Apply{" "}
+                          </a>
+                          <ExternalLink className="inline-block ml-5 cursor-pointer" />
+                        </Button>
+                      ) : (
+                        <Button
+                          className="cursor-pointer w-3/4 bg-gray-200 text-gray-400 cursor-not-allowed"
+                          variant="outline"
+                          disabled
+                        >
+                          <span className="font-inter text-sm inline-block">
+                            No Link Found
+                          </span>
+                        </Button>
+                      )}
                       <Button
                         className="w-fit"
                         variant="outline"
